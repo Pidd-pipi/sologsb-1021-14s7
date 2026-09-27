@@ -6,6 +6,14 @@ const store = useDictionaryStore();
 const activeTab = ref('basic');
 const entry = computed(() => store.selectedEntry);
 const synonymsText = computed(() => entry.value?.synonyms.join('、') ?? '');
+const batchInfo = computed(() => entry.value ? store.findOpenBatchItem(entry.value.id) : undefined);
+const batchItemText = computed(() => {
+  const item = batchInfo.value?.item;
+  if (!item) return '';
+  if (item.status === 'approved') return '已通过';
+  if (item.status === 'returned') return '已退回，修改后可重新提交审校';
+  return item.reopenedAt ? '内容已变更，待重审' : '待审校';
+});
 
 const eventValue = (event: any) => typeof event === 'string' || typeof event === 'number' ? String(event) : event?.target?.value ?? event?.e?.target?.value ?? event?.value ?? '';
 
@@ -27,6 +35,12 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
         <t-button size="small" variant="outline" @click="store.setStatus(entry.id, 'review')">提交待审</t-button>
         <t-button size="small" theme="success" @click="store.setStatus(entry.id, 'confirmed')">确认词条</t-button>
       </div>
+    </div>
+
+    <div v-if="batchInfo" class="batch-banner">
+      <span>审校批次《{{ batchInfo.batch.title }}》 · {{ batchItemText }}</span>
+      <small v-if="batchInfo.item.status === 'approved'">通过后再修改内容会自动标回待审</small>
+      <small v-else>批次内由主审逐条给出通过或退回</small>
     </div>
 
     <t-tabs v-model="activeTab" class="entry-tabs">

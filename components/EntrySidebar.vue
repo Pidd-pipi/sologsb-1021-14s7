@@ -2,7 +2,7 @@
 import { useDictionaryStore } from '~/store/dictionary';
 
 const store = useDictionaryStore();
-const emit = defineEmits<{ create: []; duplicates: []; versions: [] }>();
+const emit = defineEmits<{ create: []; duplicates: []; versions: []; batches: [] }>();
 
 const statusMeta = {
   draft: { label: '草稿', theme: 'default' },
@@ -53,12 +53,14 @@ const statusMeta = {
         <div class="entry-card-meta">
           <span>{{ entry.dialectVariants.length }} 方言变体</span>
           <span>{{ entry.examples.length }} 例句</span>
+          <span v-if="store.openBatchOf.has(entry.id)" class="batch-flag" :title="`在批次《${store.openBatchOf.get(entry.id)}》中`">批次中</span>
           <span v-if="entry.reviewerComments.filter((item) => item.status === 'open').length" class="comment-count">{{ entry.reviewerComments.filter((item) => item.status === 'open').length }} 条意见</span>
         </div>
       </button>
       <t-empty v-if="!store.filteredEntries.length" description="没有符合条件的词条" />
     </div>
     <div class="sidebar-footer">
+      <button class="text-action" @click="emit('batches')"><span>{{ store.openBatches.length }}</span> 个进行中批次</button>
       <button class="text-action" @click="emit('duplicates')"><span>{{ store.duplicates.length }}</span> 组疑似重复</button>
       <button class="text-action" @click="emit('versions')"><span>{{ store.versions.length }}</span> 条版本记录</button>
     </div>
