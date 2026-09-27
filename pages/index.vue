@@ -6,6 +6,7 @@ import ReviewPanel from '~/components/ReviewPanel.vue';
 import DuplicateMergeDialog from '~/components/DuplicateMergeDialog.vue';
 import DeleteImpactDialog from '~/components/DeleteImpactDialog.vue';
 import VersionDrawer from '~/components/VersionDrawer.vue';
+import ReviewBatchDrawer from '~/components/ReviewBatchDrawer.vue';
 import { useDictionaryStore } from '~/store/dictionary';
 import { referencesToEntry } from '~/utils/dictionary';
 import type { DictionaryEntry } from '~/types/dictionary';
@@ -13,6 +14,7 @@ import type { DictionaryEntry } from '~/types/dictionary';
 const store = useDictionaryStore();
 const duplicateOpen = ref(false);
 const versionsOpen = ref(false);
+const batchOpen = ref(false);
 const deleteOpen = ref(false);
 const deleteTarget = ref<DictionaryEntry | null>(null);
 const statusText = ref('本地数据已同步');
@@ -76,6 +78,7 @@ const keyboard = (event: KeyboardEvent) => {
   if (event.key.toLowerCase() === 'k') { event.preventDefault(); moveEntry(-1); }
   if (event.key.toLowerCase() === 'd') { event.preventDefault(); openDuplicates(); }
   if (event.key.toLowerCase() === 'v') { event.preventDefault(); versionsOpen.value = true; }
+  if (event.key.toLowerCase() === 'b') { event.preventDefault(); batchOpen.value = true; }
 };
 
 onMounted(() => window.addEventListener('keydown', keyboard));
@@ -103,11 +106,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keyboard));
         <div><strong>{{ store.entries.filter((entry) => entry.status === 'disputed').length }}</strong><span>争议</span></div>
         <div><strong>{{ store.openComments }}</strong><span>待回复意见</span></div>
         <div><strong>{{ store.duplicates.length }}</strong><span>疑似重复</span></div>
+        <div><strong>{{ store.openBatches.length }}</strong><span>进行中批次</span></div>
       </div>
     </section>
 
     <main class="workspace">
-      <EntrySidebar @create="store.createEntry" @duplicates="openDuplicates" @versions="versionsOpen = true" />
+      <EntrySidebar @create="store.createEntry" @duplicates="openDuplicates" @versions="versionsOpen = true" @batches="batchOpen = true" />
       <EntryEditor />
       <ReviewPanel @versions="versionsOpen = true" />
     </main>
@@ -116,7 +120,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keyboard));
       <div class="method-card"><span class="method-index">01</span><div><strong>字段级审校</strong><p>审校意见绑定到词形、发音、释义、例句或来源，编辑可逐条回复并解决。</p></div></div>
       <div class="method-card"><span class="method-index">02</span><div><strong>引用影响检查</strong><p>删除词条前扫描同义词、释义和例句引用，列出可能受影响的全部词条。</p></div></div>
       <div class="method-card"><span class="method-index">03</span><div><strong>离线版本保护</strong><p>所有编辑在浏览器本地保存；撤销重做与版本恢复均保留提交前完整快照。</p></div></div>
-      <div class="keyboard-card"><kbd>J/K</kbd><span>切换词条</span><kbd>/</kbd><span>搜索</span><kbd>D</kbd><span>查重</span><kbd>V</kbd><span>版本</span></div>
+      <div class="keyboard-card"><kbd>J/K</kbd><span>切换词条</span><kbd>/</kbd><span>搜索</span><kbd>D</kbd><span>查重</span><kbd>V</kbd><span>版本</span><kbd>B</kbd><span>批次</span></div>
     </section>
 
     <footer class="footer-bar">
@@ -128,6 +132,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keyboard));
       <DuplicateMergeDialog v-model="duplicateOpen" :pairs="store.duplicates" />
       <DeleteImpactDialog v-model="deleteOpen" :entry="deleteTarget" :impacts="impacts" @confirm="confirmDelete" />
       <VersionDrawer v-model="versionsOpen" />
+      <ReviewBatchDrawer v-model="batchOpen" />
     </ClientOnly>
   </div>
 </template>

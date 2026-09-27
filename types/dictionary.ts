@@ -49,6 +49,26 @@ export interface DictionaryEntry {
   reviewerComments: ReviewComment[];
 }
 
+export type ReviewBatchItemStatus = 'pending' | 'approved' | 'returned';
+
+export interface ReviewBatchItem {
+  entryId: string;
+  status: ReviewBatchItemStatus;
+  decidedAt?: string;
+  note?: string;
+  contentHash?: string;
+}
+
+export interface ReviewBatch {
+  id: string;
+  title: string;
+  reviewer: string;
+  status: 'open' | 'closed';
+  createdAt: string;
+  closedAt?: string;
+  items: ReviewBatchItem[];
+}
+
 export interface VersionRecord {
   id: string;
   at: string;
@@ -71,6 +91,7 @@ export interface DictionarySnapshot {
   entries: DictionaryEntry[];
   versions: VersionRecord[];
   audit: AuditRecord[];
+  batches: ReviewBatch[];
 }
 
 export interface DuplicatePair {

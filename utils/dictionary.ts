@@ -47,6 +47,18 @@ export const findDuplicates = (entries: DictionaryEntry[]): DuplicatePair[] => {
   return pairs.sort((a, b) => b.score - a.score);
 };
 
+export const entryContentSignature = (entry: DictionaryEntry) => JSON.stringify({
+  headword: entry.headword,
+  pronunciation: entry.pronunciation,
+  partOfSpeech: entry.partOfSpeech,
+  definition: entry.definition,
+  notes: entry.notes,
+  synonyms: entry.synonyms,
+  dialectVariants: entry.dialectVariants,
+  examples: entry.examples,
+  sources: entry.sources
+});
+
 export const referencesToEntry = (entries: DictionaryEntry[], target: DictionaryEntry) => {
   const names = new Set([target.headword, ...target.synonyms].map(normalizeWord));
   return entries.filter((entry) => entry.id !== target.id && (

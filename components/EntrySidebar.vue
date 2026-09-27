@@ -2,7 +2,7 @@
 import { useDictionaryStore } from '~/store/dictionary';
 
 const store = useDictionaryStore();
-const emit = defineEmits<{ create: []; duplicates: []; versions: [] }>();
+const emit = defineEmits<{ create: []; duplicates: []; versions: []; batches: [] }>();
 
 const statusMeta = {
   draft: { label: '草稿', theme: 'default' },
@@ -10,6 +10,12 @@ const statusMeta = {
   disputed: { label: '争议', theme: 'danger' },
   confirmed: { label: '已确认', theme: 'success' }
 } as const;
+
+const batchItemLabels = { pending: '待审', approved: '已通过', returned: '已退回' } as const;
+const batchFlagOf = (entryId: string) => {
+  const hit = store.openBatchByEntry.get(entryId);
+  return hit ? batchItemLabels[hit.item.status] : '';
+};
 </script>
 
 <template>
@@ -54,11 +60,13 @@ const statusMeta = {
           <span>{{ entry.dialectVariants.length }} 方言变体</span>
           <span>{{ entry.examples.length }} 例句</span>
           <span v-if="entry.reviewerComments.filter((item) => item.status === 'open').length" class="comment-count">{{ entry.reviewerComments.filter((item) => item.status === 'open').length }} 条意见</span>
+          <span v-if="batchFlagOf(entry.id)" class="batch-flag" :class="store.openBatchByEntry.get(entry.id)?.item.status">批次·{{ batchFlagOf(entry.id) }}</span>
         </div>
       </button>
       <t-empty v-if="!store.filteredEntries.length" description="没有符合条件的词条" />
     </div>
     <div class="sidebar-footer">
+      <button class="text-action" @click="emit('batches')"><span>{{ store.openBatches.length }}</span> 个进行中批次</button>
       <button class="text-action" @click="emit('duplicates')"><span>{{ store.duplicates.length }}</span> 组疑似重复</button>
       <button class="text-action" @click="emit('versions')"><span>{{ store.versions.length }}</span> 条版本记录</button>
     </div>

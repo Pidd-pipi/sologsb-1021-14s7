@@ -1,9 +1,9 @@
 import { computed, reactive, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type {
-  AuditRecord, DictionaryEntry, DictionarySnapshot, DuplicatePair, EntryStatus, ReviewComment, VersionRecord
+  AuditRecord, DictionaryEntry, DictionarySnapshot, DuplicatePair, EntryStatus, ReviewBatch, ReviewBatchItem, ReviewComment, VersionRecord
 } from '~/types/dictionary';
-import { findDuplicates } from '~/utils/dictionary';
+import { entryContentSignature, findDuplicates } from '~/utils/dictionary';
 
 const now = () => new Date().toISOString();
 const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36)}`;
@@ -58,6 +58,7 @@ export const useDictionaryStore = defineStore('dictionary', () => {
   const entries = reactive<DictionaryEntry[]>(seedEntries());
   const versions = reactive<VersionRecord[]>([]);
   const audit = reactive<AuditRecord[]>(seedAudit);
+  const batches = reactive<ReviewBatch[]>([]);
   const selectedId = ref(entries[0]?.id ?? '');
   const hydrated = ref(false);
   const undoStack = ref<DictionarySnapshot[]>([]);
@@ -72,7 +73,8 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     revision: revision.value,
     entries: clone(entries),
     versions: clone(versions),
-    audit: clone(audit)
+    audit: clone(audit),
+    batches: clone(batches)
   }));
   const duplicates = computed<DuplicatePair[]>(() => findDuplicates(entries));
   const openComments = computed(() => entries.reduce((sum, entry) => sum + entry.reviewerComments.filter((comment) => comment.status === 'open').length, 0));
@@ -87,13 +89,21 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     });
   });
   const dialects = computed(() => [...new Set(entries.flatMap((entry) => entry.dialectVariants.map((variant) => variant.dialect)))].sort());
+  const openBatches = computed(() => batches.filter((batch) => batch.status === 'open'));
+  const closedBatches = computed(() => batches.filter((batch) => batch.status === 'closed'));
+  const openBatchByEntry = computed(() => {
+    const map = new Map<string, { batch: ReviewBatch; item: ReviewBatchItem }>();
+    openBatches.value.forEach((batch) => batch.items.forEach((item) => map.set(item.entryId, { batch, item })));
+    return map;
+  });
 
   function snapshot(): DictionarySnapshot {
     return {
       revision: revision.value,
       entries: clone(entries),
       versions: clone(versions),
-      audit: clone(audit)
+      audit: clone(audit),
+      batches: clone(batches)
     };
   }
 
@@ -102,7 +112,34 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     entries.splice(0, entries.length, ...(clone(value.entries ?? [])));
     versions.splice(0, versions.length, ...(clone(value.versions ?? [])));
     audit.splice(0, audit.length, ...(clone(value.audit ?? [])));
+    batches.splice(0, batches.length, ...(clone(value.batches ?? [])));
     if (!entries.some((entry) => entry.id === selectedId.value)) selectedId.value = entries[0]?.id ?? '';
+  }
+
+  function syncBatches(before: DictionaryEntry[]) {
+    const invalidated: Array<{ batch: ReviewBatch; entry: DictionaryEntry }> = [];
+    const pruned: Array<{ batch: ReviewBatch; headword: string }> = [];
+    batches.filter((batch) => batch.status === 'open').forEach((batch) => {
+      for (let index = batch.items.length - 1; index >= 0; index -= 1) {
+        const item = batch.items[index]!;
+        if (!entries.some((entry) => entry.id === item.entryId)) {
+          pruned.push({ batch, headword: before.find((entry) => entry.id === item.entryId)?.headword ?? item.entryId });
+          batch.items.splice(index, 1);
+        }
+      }
+      batch.items.forEach((item) => {
+        if (item.status !== 'approved') return;
+        const entry = entries.find((candidate) => candidate.id === item.entryId);
+        if (!entry || entryContentSignature(entry) === item.contentHash) return;
+        item.status = 'pending';
+        item.decidedAt = undefined;
+        item.note = undefined;
+        item.contentHash = undefined;
+        if (entry.status === 'confirmed') entry.status = 'review';
+        invalidated.push({ batch, entry });
+      });
+    });
+    return { invalidated, pruned };
   }
 
   function commit(action: string, detail: string, entryIds: string[], mutation: () => void) {
@@ -112,9 +149,24 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     mutation();
     revision.value += 1;
     entries.forEach((entry) => { if (entryIds.includes(entry.id)) entry.updatedAt = now(); });
+    const { invalidated, pruned } = syncBatches(before);
     versions.unshift({ id: uid('version'), at: now(), action, detail, entryId: entryIds[0], before });
     versions.splice(120);
     audit.unshift({ id: uid('audit'), at: now(), action, detail, entryIds });
+    if (invalidated.length) {
+      audit.unshift({
+        id: uid('audit'), at: now(), action: '批次审校失效',
+        detail: invalidated.map(({ batch, entry }) => `“${entry.headword}”在批次「${batch.title}」中已通过，内容变更后标回待审`).join('；'),
+        entryIds: invalidated.map(({ entry }) => entry.id)
+      });
+    }
+    if (pruned.length) {
+      audit.unshift({
+        id: uid('audit'), at: now(), action: '批次成员移除',
+        detail: pruned.map(({ batch, headword }) => `“${headword}”已删除，移出批次「${batch.title}」`).join('；'),
+        entryIds: []
+      });
+    }
     audit.splice(300);
   }
 
@@ -271,6 +323,51 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     });
   }
 
+  function createBatch(title: string, entryIds: string[], reviewer = '主审·和老师') {
+    const busy = new Set(openBatches.value.flatMap((batch) => batch.items.map((item) => item.entryId)));
+    const picked = [...new Set(entryIds)].filter((id) => !busy.has(id) && entries.some((entry) => entry.id === id));
+    if (!picked.length) return '';
+    const batch: ReviewBatch = {
+      id: uid('batch'),
+      title: title.trim() || `审校批次 ${batches.length + 1}`,
+      reviewer,
+      status: 'open',
+      createdAt: now(),
+      items: picked.map((entryId) => ({ entryId, status: 'pending' as const }))
+    };
+    commit('发起审校批次', `批次「${batch.title}」收录 ${picked.length} 个词条，等待逐条审校`, picked, () => batches.unshift(batch));
+    return batch.id;
+  }
+
+  function decideBatchItem(batchId: string, entryId: string, decision: 'approved' | 'returned', note = '') {
+    const batch = batches.find((item) => item.id === batchId && item.status === 'open');
+    const item = batch?.items.find((candidate) => candidate.entryId === entryId);
+    const entry = entries.find((candidate) => candidate.id === entryId);
+    if (!batch || !item || !entry) return;
+    commit(
+      decision === 'approved' ? '批次通过' : '批次退回',
+      `批次「${batch.title}」：“${entry.headword}”${decision === 'approved' ? '审校通过' : '退回修改'}`,
+      [entryId],
+      () => {
+        item.status = decision;
+        item.decidedAt = now();
+        item.note = note.trim();
+        item.contentHash = decision === 'approved' ? entryContentSignature(entry) : undefined;
+        entry.status = decision === 'approved' ? 'confirmed' : 'draft';
+      }
+    );
+  }
+
+  function closeBatch(batchId: string) {
+    const batch = batches.find((item) => item.id === batchId && item.status === 'open');
+    if (!batch || batch.items.some((item) => item.status !== 'approved')) return false;
+    commit('结束审校批次', `批次「${batch.title}」${batch.items.length} 个词条全部通过，批次结束`, batch.items.map((item) => item.entryId), () => {
+      batch.status = 'closed';
+      batch.closedAt = now();
+    });
+    return true;
+  }
+
   function undo() {
     const value = undoStack.value.at(-1);
     if (!value) return;
@@ -311,11 +408,13 @@ export const useDictionaryStore = defineStore('dictionary', () => {
   }
 
   return {
-    revision, entries, versions, audit, selectedId, hydrated, query, statusFilter, dialectFilter, fieldReplyDrafts,
+    revision, entries, versions, audit, batches, selectedId, hydrated, query, statusFilter, dialectFilter, fieldReplyDrafts,
     selectedEntry, filteredEntries, dialects, duplicates, openComments, persistableSnapshot,
+    openBatches, closedBatches, openBatchByEntry,
     canUndo: computed(() => undoStack.value.length > 0), canRedo: computed(() => redoStack.value.length > 0),
     createEntry, updateField, setStatus, addVariant, updateVariant, removeVariant, addExample, updateExample, removeExample,
     addSource, updateSource, removeSource, setSynonyms, addComment, replyComment, toggleComment, deleteEntry, mergeEntries,
+    createBatch, decideBatchItem, closeBatch,
     undo, redo, restoreVersion, hydrateFromBrowser, exportPackage
   };
 });
